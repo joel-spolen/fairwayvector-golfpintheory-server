@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="referrer" content="no-referrer">
+  <title>Pin Theory · Data operations</title>
+  <link rel="stylesheet" href="/admin/admin.css">
+  <script src="/admin/admin.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <aside class="sidebar" aria-label="Primary navigation">
+    <a class="brand" href="#main" aria-label="Fairway Vector Pin Theory data operations">
+      <span class="brand-mark">FV<span class="brand-dot"></span></span>
+      <span><strong>PIN THEORY</strong><small>DATA OPERATIONS</small></span>
+    </a>
+    <p class="nav-label">WORKSPACE</p>
+    <nav>
+      <a class="nav-link" href="#overview"><span aria-hidden="true">◫</span> Overview</a>
+      <a class="nav-link" href="#inventory"><span aria-hidden="true">▤</span> Course inventory</a>
+      <a class="nav-link" href="#associations"><span aria-hidden="true">⌁</span> Profile associations</a>
+    </nav>
+    <div class="sidebar-note"><span class="status-dot"></span> Local cache operations<p>Inspect what’s already stored.<br>No paid data acquisition here.</p></div>
+    <button class="offline-button" disabled>Paid acquisition unavailable</button>
+    <div class="sidebar-footer">FAIRWAY VECTOR<span>Precision, without the guesswork.</span></div>
+  </aside>
+  <main id="main" tabindex="-1">
+    <header class="topbar"><span>WORKSPACE <span class="slash">/</span> DATA OPERATIONS</span><div class="session"><span id="session-label">Authentication required</span><button id="logout" class="button subtle" hidden>Log out</button></div></header>
+    <section id="login-panel" class="login-panel" aria-labelledby="login-heading">
+      <div class="eyebrow">PRIVATE WORKSPACE</div>
+      <h1 id="login-heading">A clearer view of<br>your data.</h1>
+      <p>Inspect client traffic, provider budgets and cached course data. Sign in to load a private snapshot.</p>
+      <form id="login-form">
+        <label for="admin-token">Admin token</label>
+        <input id="admin-token" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" required aria-describedby="token-help login-error">
+        <p id="token-help" class="help">Use the server’s ADMIN_API_TOKEN. Held only in this page’s memory; never saved.</p>
+        <button id="login-submit" class="button primary" type="submit">Open dashboard <span aria-hidden="true">↗</span></button>
+      </form>
+      <p id="login-error" class="error" role="alert"></p>
+      <div class="login-footnote"><span class="status-dot"></span> Read-only monitoring · explicit local associations only</div>
+    </section>
+    <div id="dashboard" hidden>
+      <section id="overview" class="page-heading"><div><div class="eyebrow">THE OPERATIONS DESK</div><h1>Overview<span class="heading-dot">.</span></h1><p>Your traffic. Your cache. One clear picture.</p></div><div class="heading-actions"><label for="period" class="sr-only">Traffic period</label><select id="period"><option value="1">Today</option><option value="7" selected>Last 7 days</option><option value="30">Last 30 days</option><option value="0">All time</option></select><button id="refresh" class="button" type="button">↻ Refresh</button></div></section>
+      <div class="snapshot-bar"><div><span class="status-dot"></span><span id="snapshot-time"></span></div><label class="toggle"><input id="auto-refresh" type="checkbox"> Auto-refresh every 30s</label></div>
+      <p id="notice" class="notice" role="status" aria-live="polite"></p>
+      <div id="snapshot" aria-busy="false">
+        <section class="metrics" aria-label="Key metrics">
+          <article class="metric"><span class="metric-label">Client API requests</span><strong id="metric-requests">—</strong><small id="requests-note"></small><span class="metric-index">01 / TRAFFIC</span></article>
+          <article class="metric"><span class="metric-label">Stored-cache hit rate</span><strong id="metric-hitrate">—</strong><small id="hitrate-note"></small><span class="metric-index">02 / EFFICIENCY</span></article>
+          <article class="metric"><span class="metric-label">Upstream calls</span><strong id="metric-upstream">—</strong><small id="upstream-note"></small><span class="metric-index">03 / PROVIDERS</span></article>
+          <article class="metric accent"><span class="metric-label">Stored elevation samples</span><strong id="metric-samples">—</strong><small>Global inventory · independent of period</small><span class="metric-index">04 / DATASET</span></article>
+        </section>
+        <div class="overview-grid">
+          <section class="panel traffic-panel" aria-labelledby="traffic-heading"><div class="panel-heading"><div><div class="eyebrow">REQUEST ACTIVITY · UTC</div><h2 id="traffic-heading">Traffic, day by day</h2></div><span id="trend-period" class="pill"></span></div><div class="chart-legend"><span><i class="legend-client"></i> Client requests</span><span><i class="legend-upstream"></i> Upstream attempts</span></div><div id="traffic-chart" class="traffic-chart"></div><details class="daily-details"><summary>View daily counts and outcomes</summary><div class="table-scroll"><table><caption class="sr-only">Daily traffic in UTC</caption><thead><tr><th scope="col">Day</th><th scope="col">Requests</th><th scope="col">Cache hits</th><th scope="col">Coalesced</th><th scope="col">Upstream</th><th scope="col">Errors</th></tr></thead><tbody id="daily-rows"></tbody></table></div></details><p id="tracking-note" class="help chart-note"></p></section>
+          <section class="panel" aria-labelledby="providers-heading"><div class="panel-heading"><div><div class="eyebrow">GUARDRAILS</div><h2 id="providers-heading">Provider budgets</h2></div><span class="pill">Today · UTC</span></div><div id="providers"></div><p class="help">Budgets count upstream attempts, not successful responses. Disabled providers may still serve stored cache hits.</p></section>
+        </div>
+        <section id="inventory" class="panel inventory-panel" aria-labelledby="inventory-heading"><div class="panel-heading"><div><div class="eyebrow">ALREADY ON HAND</div><h2 id="inventory-heading">Course inventory</h2><p class="help">Global cached dataset · not filtered by the traffic period. Profiles are paths, not course-coverage percentages.</p></div><span class="pill">Local cache only</span></div><div id="inventory-stats" class="inventory-stats"></div><form id="search-form" class="search-form" role="search"><label for="course-search" class="sr-only">Search cached courses by name, ID, club or country</label><input id="course-search" type="search" placeholder="Search name, ID, club or country…" maxlength="200"><button class="button" type="submit">Search courses</button><button id="clear-search" class="button subtle" type="button">Clear</button></form><div class="table-scroll" tabindex="0" role="region" aria-label="Cached courses, scroll horizontally"><table class="courses-table"><caption class="sr-only">Cached course metadata and elevation inventory</caption><thead><tr><th scope="col">Course / location</th><th scope="col">Course data</th><th scope="col">Elevation profiles</th><th scope="col">Path / storage</th><th scope="col">Cache dates</th></tr></thead><tbody id="course-rows"></tbody></table></div><p id="courses-empty" class="empty" hidden></p><div class="pagination"><span id="page-summary"></span><div><button id="previous" class="button" type="button">← Previous</button><button id="next" class="button" type="button">Next →</button></div></div></section>
+        <section id="associations" class="panel association-panel" aria-labelledby="associations-heading"><div class="panel-heading"><div><div class="eyebrow">CACHE HOUSEKEEPING</div><h2 id="associations-heading">Unassigned elevation profiles</h2><p class="help">Associate an existing profile with a known cached course. No provider request, acquisition or resampling.</p></div><span id="unassigned-count" class="pill"></span></div><p id="assignment-empty" class="empty" hidden></p><form id="assignment-form"><div class="assignment-fields"><div><label for="profile-key">Stored profile</label><select id="profile-key" required></select></div><div><label for="course-id">Known cached course</label><select id="course-id" required></select></div></div><div id="profile-detail" class="profile-detail"></div><div class="association-actions"><p class="help">Only associate a profile when you have verified its course. Course options are capped at 1,000; profiles show the latest 50.</p><button id="assign-submit" class="button primary" type="submit">Associate profile</button></div></form><p id="assignment-status" role="status" aria-live="polite"></p></section>
+      </div>
+      <footer class="page-footer"><span>PIN THEORY <span class="slash">/</span> DATA OPERATIONS</span><span>Unique users unavailable. Health and admin traffic excluded.</span></footer>
+    </div>
+  </main>
+</body>
+</html>

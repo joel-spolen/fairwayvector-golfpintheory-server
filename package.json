@@ -1,0 +1,21 @@
+{
+    "name": "fairwayvector-golfpintheory-server",
+    "version": "0.1.0",
+    "private": true,
+    "type": "module",
+    "engines": {
+        "node": ">=22.19.0"
+    },
+    "scripts": {
+        "start": "node --env-file-if-exists=.env src/index.js",
+        "dev": "node --watch --env-file-if-exists=.env src/index.js",
+        "test": "node --test",
+        "check": "node --check src/index.js && node --check src/app.js && node --check src/cache.js && node --check src/providers.js && node --check src/config.js && node --check src/geometry.js && node --check src/admin.js && node --check src/admin-store.js && node --check public/admin.js",
+        "backup": "node --env-file-if-exists=.env scripts/backup.js"
+    },
+    "dependencies": {
+        "@fastify/formbody": "^8.0.2",
+        "@fastify/rate-limit": "^10.3.0",
+        "fastify": "^5.6.2"
+    }
+}
