@@ -15,8 +15,8 @@ try {
   }
   try {
     await app.listen({ host: config.host, port: config.port });
-    console.info(`Golf PinTheory server listening on ${config.host}:${config.port}`);
-    console.info(`Paid fetching: GolfAPI=${config.providers.golf.enabled}; GPXZ=${config.providers.gpxz.enabled}`);
+    const host = config.host === '::1' ? '[::1]' : config.host;
+    console.info(`PinTheory local admin GUI: http://${host}:${app.server.address().port}/admin`);
   } catch {
     await app.close();
     console.error('Server could not listen. Check the configured host and port.');
@@ -27,6 +27,6 @@ try {
   // Keep arbitrary filesystem/database errors redacted.
   console.error(error instanceof ConfigurationError
     ? `Server configuration error: ${error.message}. Update the local environment configuration and restart.`
-    : 'Server startup failed. Check configuration, Node version, data directory permissions and server.lock.');
+    : 'Local admin startup failed. Check configuration and Node version.');
   process.exitCode = 1;
 }

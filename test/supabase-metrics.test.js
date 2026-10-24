@@ -12,7 +12,7 @@ const ADMIN = 'offline-admin-token-not-real-9876543210';
 const KEY = 'eyJoffline_service_role_fixture';
 const URL_ROOT = 'https://offline-project.supabase.co';
 const EPOCH = Date.parse('2026-10-24T12:00:00Z');
-const AUTH = { authorization: `Bearer ${ADMIN}` };
+const AUTH = { host: '127.0.0.1:8080' };
 const settings = { url: URL_ROOT, key: KEY };
 const originalFetch = globalThis.fetch;
 let unexpectedCalls = 0;
@@ -242,7 +242,7 @@ test('10 second deadline covers ignored fetch abort and stalled streamed body', 
   t.mock.timers.tick(10000); safeUnavailable(await reading); assert.equal(cancelled, true);
 });
 
-test('admin-only route is isolated, validates queries before dispatch, and never persists aggregates', async t => {
+test('local accounts route validates queries before dispatch and never persists aggregates', async t => {
   const dir = await mkdtemp(join(tmpdir(), 'offline-supabase-metrics-'));
   const apps = new Set();
   t.after(async () => {
@@ -257,11 +257,11 @@ test('admin-only route is isolated, validates queries before dispatch, and never
   });
   apps.add(app);
   assert.equal(calls, 0);
-  for (const url of ['/healthz', '/admin', '/api/admin/overview']) {
+  for (const url of ['/healthz', '/admin']) {
     assert.equal((await app.inject({ url, headers: AUTH })).statusCode, 200);
   }
-  for (const headers of [{}, { authorization: `Bearer ${TOKEN}` }, { authorization: 'Bearer wrong' }]) {
-    assert.equal((await app.inject({ url: '/api/admin/accounts', headers })).statusCode, 401);
+  for (const headers of [{ host: 'evil.example:8080' }, { ...AUTH, origin: 'https://evil.example' }]) {
+    assert.equal((await app.inject({ url: '/api/admin/accounts', headers })).statusCode, 403);
   }
   assert.equal((await app.inject({ url: '/api/admin/accounts?refresh=true', headers: AUTH })).statusCode, 400);
   assert.equal(calls, 0);
@@ -269,8 +269,6 @@ test('admin-only route is isolated, validates queries before dispatch, and never
   assert.equal(response.statusCode, 200); assert.equal(response.json().status, 'ready'); assert.equal(calls, 1);
   assert.equal(response.headers['cache-control'], 'no-store');
   for (const secret of [KEY, URL_ROOT, ADMIN, TOKEN, 'apikey', 'Authorization']) assert.ok(!response.body.includes(secret));
-  const overview = await app.inject({ url: '/api/admin/overview', headers: AUTH });
-  assert.equal(overview.statusCode, 200); assert.equal(overview.json().accounts, undefined); assert.equal(calls, 1);
   await app.close();
   apps.delete(app);
   // New instance has no metrics cache on disk: next explicit account GET must fetch.
@@ -281,11 +279,10 @@ test('admin-only route is isolated, validates queries before dispatch, and never
   assert.equal(calls, 1);
   const unavailable = await reopened.inject({ url: '/api/admin/accounts', headers: AUTH });
   assert.equal(unavailable.statusCode, 200); safeUnavailable(unavailable.json()); assert.equal(calls, 2);
-  assert.equal((await reopened.inject({ url: '/api/admin/overview', headers: AUTH })).statusCode, 200);
   assert.equal(calls, 2);
 });
 
-test('disabled metrics return HTTP 200; disabled admin still blocks all dispatch', async t => {
+test('disabled metrics return HTTP 200 regardless of deprecated admin token', async t => {
   for (const adminEnabled of [true, false]) {
     const dir = await mkdtemp(join(tmpdir(), 'offline-disabled-metrics-'));
     const app = await buildApp(loadConfig(env({ DATA_DIR: dir, ADMIN_API_TOKEN: adminEnabled ? ADMIN : '',
@@ -294,8 +291,8 @@ test('disabled metrics return HTTP 200; disabled admin still blocks all dispatch
     });
     t.after(async () => { await app.close(); await rm(dir, { recursive: true, force: true }); });
     const response = await app.inject({ url: '/api/admin/accounts', headers: AUTH });
-    assert.equal(response.statusCode, adminEnabled ? 200 : 503);
-    if (adminEnabled) assert.deepEqual(response.json(), { status: 'disabled', fetchedAt: null,
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.json(), { status: 'disabled', fetchedAt: null,
       data: null, message: 'Account metrics are not configured.' });
   }
 });

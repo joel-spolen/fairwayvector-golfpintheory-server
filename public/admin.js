@@ -1,8 +1,7 @@
 (() => {
   'use strict';
 
-  // The credential and snapshot deliberately never leave this closure for storage.
-  let token = '';
+  // Snapshots are memory-only. No browser credential is needed or stored.
   let snapshot = null;
   let accountSnapshot = null;
   let busy = false;
@@ -40,58 +39,23 @@
   function stopTimer() { clearInterval(timer); timer = null; }
   function configureTimer() {
     stopTimer();
-    if (token && snapshot && $('auto-refresh').checked) {
+    if ($('auto-refresh').checked) {
       timer = setInterval(() => {
         if (!busy && !document.hidden) refresh();
       }, 30000);
     }
   }
   function updateControls() {
-    $('login-submit').disabled = busy;
+    if (!snapshot) $('assignment-form').hidden = true;
     for (const id of ['refresh', 'period', 'previous', 'next', 'course-search', 'clear-search', 'profile-key', 'course-id']) $(id).disabled = busy;
     $('search-form').querySelector('button[type="submit"]').disabled = busy;
     if (!busy) {
       $('previous').disabled = !snapshot || snapshot.courses.page <= 1;
       $('next').disabled = !snapshot || snapshot.courses.page * snapshot.courses.pageSize >= snapshot.courses.total;
     }
-    $('assign-submit').disabled = busy || stale || !$('profile-key').value || !$('course-id').value;
+    $('assign-submit').disabled = busy || stale || !snapshot || !$('profile-key').value || !$('course-id').value;
     $('snapshot').setAttribute('aria-busy', String(busy));
     $('refresh').textContent = busy ? 'Updating…' : '↻ Refresh';
-  }
-  function clearSession(message = '') {
-    generation += 1;
-    controller?.abort();
-    controller = null;
-    token = '';
-    snapshot = null;
-    accountSnapshot = null;
-    busy = false;
-    stale = false;
-    search = '';
-    snapshotSearch = '';
-    page = 1;
-    stopTimer();
-    $('auto-refresh').checked = false;
-    $('admin-token').value = '';
-    $('course-search').value = '';
-    $('period').value = '7';
-    $('dashboard').hidden = true;
-    $('login-panel').hidden = false;
-    $('logout').hidden = true;
-    for (const id of ['daily-rows', 'traffic-chart', 'providers', 'inventory-stats', 'course-rows', 'profile-key', 'course-id', 'profile-detail']) $(id).replaceChildren();
-    for (const id of ['snapshot-time', 'requests-note', 'hitrate-note', 'upstream-note', 'tracking-note', 'trend-period', 'page-summary', 'unassigned-count', 'assignment-status', 'assignment-empty', 'courses-empty', 'notice']) set(id, '');
-    for (const id of ['metric-requests', 'metric-hitrate', 'metric-upstream', 'metric-samples']) set(id, '—');
-    for (const id of ['accounts-current', 'accounts-active', 'accounts-registrations', 'accounts-deletions']) set(id, '—');
-    for (const id of ['accounts-notice', 'accounts-time', 'accounts-registration-note', 'accounts-tracking']) set(id, '');
-    $('accounts-storage').replaceChildren();
-    $('accounts').setAttribute('aria-busy', 'false');
-    $('accounts-definitions').removeAttribute('open');
-    set('accounts-status', 'Not loaded');
-    $('assignment-form').hidden = true;
-    set('login-error', message);
-    set('session-label', 'Authentication required');
-    updateControls();
-    $('admin-token').focus();
   }
   class RequestError extends Error {
     constructor(status) { super('Request failed'); this.status = status; }
@@ -99,7 +63,7 @@
   async function api(path, signal, body) {
     const response = await fetch(path, {
       method: body ? 'POST' : 'GET',
-      headers: { Authorization: `Bearer ${token}`, Accept: 'application/json', ...(body ? { 'Content-Type': 'application/json' } : {}) },
+      headers: { Accept: 'application/json', ...(body ? { 'Content-Type': 'application/json', 'X-Local-Admin': '1' } : {}) },
       ...(body ? { body: JSON.stringify(body) } : {}),
       credentials: 'omit', cache: 'no-store', mode: 'same-origin', redirect: 'error', signal
     });
@@ -107,7 +71,8 @@
     return response.json();
   }
   function messageFor(error) {
-    if (error.status === 503) return 'Admin API unavailable. It may be disabled: ask the operator to configure ADMIN_API_TOKEN, then retry.';
+    if (error.status === 503) return 'Supabase administration unavailable. Configure the local Supabase connection and deploy the admin migrations, then retry.';
+    if (error.status === 403) return 'Local security check rejected this request. Open the dashboard directly using its loopback address.';
     if (error.status === 429) return 'Too many requests. Wait a moment before retrying.';
     if (error.status === 400 || error.status === 404) return 'This selection is no longer available. Refresh the snapshot and try again.';
     return 'Could not reach a valid admin response. Check the connection and try again.';
@@ -120,7 +85,7 @@
       && Array.isArray(data.unassigned?.items) && Array.isArray(data.courseOptions);
   }
   async function refresh(successMessage = '') {
-    if (busy || !token) return;
+    if (busy) return;
     busy = true;
     const current = generation;
     controller = new AbortController();
@@ -145,26 +110,19 @@
       page = data.courses.page;
       stale = false;
       $('period').value = String(data.period.days);
-      $('login-panel').hidden = true;
-      $('dashboard').hidden = false;
-      $('logout').hidden = false;
-      set('session-label', 'Admin session · memory only');
-      set('login-error', '');
       render(data);
       set('assignment-status', '');
       set('notice', successMessage);
       configureTimer();
       if (firstSnapshot) $('main').focus();
-      // Authenticate with overview first. Account failures must not stale the cache snapshot.
+      // Accounts have a separate in-memory cache and failure state.
       await loadAccountMetrics(current, controller.signal);
     } catch (error) {
       if (current !== generation || error.name === 'AbortError') return;
-      if (error.status === 401 || error.status === 403) {
-        clearSession('Access denied or session expired. Enter a valid admin token to continue.');
-        return;
-      }
       if (!snapshot) {
-        clearSession(messageFor(error));
+        stale = true;
+        set('notice', messageFor(error));
+        await loadAccountMetrics(current, controller.signal);
         return;
       }
       stale = true;
@@ -222,7 +180,7 @@
   }
   function accountFailure(message) {
     set('accounts-status', accountSnapshot ? 'Stale' : 'Unavailable');
-    set('accounts-notice', `${message} ${accountSnapshot ? 'Showing the last available account snapshot; these figures are stale.' : 'Account figures are unavailable, not zero.'} Cache monitoring remains available.`);
+    set('accounts-notice', `${message} ${accountSnapshot ? 'Showing the last available account snapshot; these figures are stale.' : 'Account figures are unavailable, not zero.'} Account metrics and hosted-cache monitoring have separate availability.`);
   }
   async function loadAccountMetrics(current, parentSignal) {
     // This child deadline never aborts overview or association controllers.
@@ -258,10 +216,6 @@
       }
     } catch (error) {
       if (current !== generation || parentSignal.aborted) return;
-      if (error.status === 401 || error.status === 403) {
-        clearSession('Access denied or session expired. Enter a valid admin token to continue.');
-        return;
-      }
       accountFailure(error.name === 'AbortError'
         ? 'The account metrics request timed out. Try Refresh again.'
         : 'Account metrics could not be loaded. The optional endpoint may be unavailable or not yet deployed.');
@@ -408,14 +362,14 @@
     const { traffic, inventory } = data;
     set('snapshot-time', `Snapshot ${date(data.generatedAt)}`);
     set('metric-requests', count(traffic.requests));
-    set('requests-note', `${data.period.label} · ${count(traffic.completed)} completed`);
+    set('requests-note', `${data.period.label} · ${count(traffic.completed)} terminal RPC outcomes`);
     set('metric-hitrate', traffic.cacheHitRate == null ? '—' : `${decimal.format(traffic.cacheHitRate * 100)}%`);
-    set('hitrate-note', traffic.cacheHitRate == null ? 'No completed requests in this period' : `${count(traffic.cacheHits)} hits / ${count(traffic.completed)} completed`);
+    set('hitrate-note', traffic.cacheHitRate == null ? 'No terminal RPC outcomes in this period' : `${count(traffic.cacheHits)} hits / ${count(traffic.completed)} terminal RPC outcomes`);
     set('metric-upstream', count(traffic.upstreamCalls));
     set('upstream-note', `${data.period.label} · attempted provider calls`);
     set('metric-samples', count(inventory.elevationSamples));
     set('trend-period', data.period.days === 0 ? 'Last 30 days' : data.period.label);
-    set('tracking-note', `Client counters began ${date(data.trackingStartedAt)}. Earlier upstream usage may exist; counts are not one-to-one. ${count(traffic.fetched)} successful MISS responses · ${count(traffic.coalesced)} coalesced completions · ${count(traffic.errors)} errors in period. MISS responses are not an upstream-success counter. Trend shows at most 30 days; all-time totals are not truncated.`);
+    set('tracking-note', `Cloud counters began ${date(data.trackingStartedAt)}. ${count(traffic.fetched)} persisted fetches · ${count(traffic.coalesced)} PENDING waiters · ${count(traffic.errors)} recorded errors in period. These are database events, not guaranteed HTTP deliveries. Pending callers receive a retry response; retrying counts as another request. Upstream attempts include reservations that may have an uncertain outcome. Trend shows at most 30 days; all-time totals are not truncated.`);
     renderChart(data.daily);
     renderProviders(data.providers);
     const stats = $('inventory-stats');
@@ -428,16 +382,6 @@
     renderCourses(data.courses);
     renderAssociations(data);
   }
-  $('login-form').addEventListener('submit', event => {
-    event.preventDefault();
-    if (busy) return;
-    token = $('admin-token').value.trim();
-    $('admin-token').value = '';
-    if (!token) { set('login-error', 'Enter an admin token to continue.'); return; }
-    generation += 1;
-    refresh();
-  });
-  $('logout').addEventListener('click', () => clearSession());
   $('refresh').addEventListener('click', () => refresh());
   $('period').addEventListener('change', () => { page = 1; refresh(); });
   $('auto-refresh').addEventListener('change', configureTimer);
@@ -453,7 +397,7 @@
   $('course-id').addEventListener('change', updateControls);
   $('assignment-form').addEventListener('submit', async event => {
     event.preventDefault();
-    if (busy || stale || !token || !snapshot) return;
+    if (busy || stale || !snapshot) return;
     const key = $('profile-key').value, courseID = $('course-id').value;
     if (!snapshot.unassigned.items.some(item => item.key === key) || !snapshot.courseOptions.some(item => String(item.id) === courseID)) return;
     busy = true;
@@ -470,15 +414,16 @@
       set('assignment-status', 'Association saved. Inventory below reflects the last successful snapshot until refresh succeeds.');
     } catch (error) {
       if (current !== generation || error.name === 'AbortError') return;
-      if (error.status === 401 || error.status === 403) { clearSession('Access denied or session expired. Sign in again.'); return; }
       // A network failure may occur after the write committed. Do not invite a blind retry.
       stale = true;
       set('assignment-status', `${messageFor(error)} The association was not confirmed; refresh before attempting another change.`);
     } finally {
       if (current === generation) { busy = false; controller = null; updateControls(); }
     }
-    if (success && current === generation) await refresh('Profile association saved. Local inventory updated.');
+    if (success && current === generation) await refresh('Profile association saved. Hosted inventory updated.');
   });
-  window.addEventListener('pagehide', () => clearSession());
+  window.addEventListener('pagehide', () => { generation += 1; controller?.abort(); stopTimer(); });
   updateControls();
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => refresh(), { once: true });
+  else refresh();
 })();
