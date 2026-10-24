@@ -10,7 +10,7 @@
         "start": "node --env-file-if-exists=.env src/index.js",
         "dev": "node --watch --env-file-if-exists=.env src/index.js",
         "test": "node --test",
-        "check": "node --check src/index.js && node --check src/app.js && node --check src/cache.js && node --check src/providers.js && node --check src/config.js && node --check src/geometry.js && node --check src/admin.js && node --check src/admin-store.js && node --check public/admin.js",
+        "check": "node --check src/index.js && node --check src/app.js && node --check src/cache.js && node --check src/providers.js && node --check src/config.js && node --check src/geometry.js && node --check src/admin.js && node --check src/admin-store.js && node --check src/supabase-metrics.js && node --check public/admin.js",
         "backup": "node --env-file-if-exists=.env scripts/backup.js"
     },
     "dependencies": {

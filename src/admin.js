@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { APIError } from './errors.js';
 
-export async function registerAdmin(app, store, config) {
+export async function registerAdmin(app, store, config, metrics) {
   // Fixed allowlist: no filesystem path is ever constructed from a user URL.
   for (const [route, file, type] of [
     ['/admin', 'admin.html', 'text/html; charset=utf-8'],
@@ -17,6 +17,9 @@ export async function registerAdmin(app, store, config) {
       return reply.type(type).send(content);
     });
   }
+  app.get('/api/admin/accounts', { schema: {
+    querystring: { type: 'object', additionalProperties: false }
+  } }, async () => metrics.get());
   app.get('/api/admin/overview', { schema: { querystring: { type: 'object', additionalProperties: false,
     properties: { days: { type: 'string', enum: ['0', '1', '7', '30'] },
       search: { type: 'string', maxLength: 200 }, page: { type: 'string', pattern: '^[1-9][0-9]{0,5}$' } }

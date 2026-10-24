@@ -24,7 +24,7 @@ Course search, details, coordinates and elevation responses survive restarts and
 ## Requirements and first start
 
 - Node.js **22.19 or newer** (tested with 22.19.0), npm. Built-in SQLite avoids a separate database service. Node 22 prints an experimental SQLite warning; this is expected.
-- No Docker, Python, Xcode, Supabase or cloud database required.
+- No Docker, Python or Xcode required. Course caching works without Supabase; optional account/storage monitoring uses your Supabase project.
 
 From this directory:
 
@@ -42,7 +42,7 @@ From this directory:
 
 ## Admin dashboard
 
-Open **http://127.0.0.1:8080/admin** after starting the server. Set `ADMIN_API_TOKEN` in your private `.env` to a random 32–512 character secret **different from `SERVER_API_TOKEN`**, restart, and enter that admin token on the page. Leaving it blank disables admin data access. No credential was generated or saved by this feature. The public login shell contains no private data; both admin API endpoints require the separate admin credential. It cannot be used on the client data API, and the client token cannot access administration.
+Open **http://127.0.0.1:8080/admin** after starting the server. Set `ADMIN_API_TOKEN` in your private `.env` to a random 32–512 character secret **different from `SERVER_API_TOKEN`**, restart, and enter that admin token on the page. Leaving it blank disables admin data access. No credential was generated or saved by this feature. The public login shell contains no private data; all admin API endpoints require the separate admin credential. It cannot be used on the client data API, and the client token cannot access administration.
 
 The responsive dashboard includes:
 
@@ -67,6 +67,26 @@ Health checks, admin requests, unknown routes, authentication failures and reque
 The token is held only in page memory—no cookie, browser storage or token-bearing URL—and is cleared on logout/authorization failure. Reloading requires login again. Use HTTPS/VPN for remote access and keep the admin credential private. Admin refreshes share the server's existing direct-IP rate limit. Admin inspection scans/aggregates the local cache, so very large inventories may require future indexing/performance work.
 
 Admin API: `GET /api/admin/overview?days=7&search=&page=1` and `POST /api/admin/elevation/assign` with JSON `{ "key": "gpxz:sample:v1:<64-character digest>", "courseID": "<cached ID>" }`. They never call providers. Schema migration is additive and keeps existing response bodies, spending counters and cooldowns; ordinary SQLite backups include the new metadata/counters.
+
+### Supabase users & storage (optional)
+
+The **Users & storage** section reads a server-only aggregate Supabase RPC through `GET /api/admin/accounts`. No user list, email, password, UUID, provider key or Supabase service credential is returned to the browser. This does **not** implement individual-user authentication for the course API; its existing shared client token is unchanged.
+
+Setup requires operator action:
+
+1. Review the new sibling backend migration `backend/migrations/202610240001_admin_account_metrics.sql`, after all three existing backend migrations. Test it and `backend/tests/admin_account_metrics_regression.sql` in a **disposable staging Supabase project** first. These SQL files have **not been database-executed or deployed** by this implementation. Do not assume they are already installed. The migration adds a private aggregate counter and Auth lifecycle trigger, with a temporary Auth write lock during installation; rehearse signup and deletion behavior before production approval.
+2. After approved deployment, set `SUPABASE_URL` to the project's HTTPS root URL and `SUPABASE_SERVICE_ROLE_KEY` to its **server-only** privileged key in the local `.env`, then restart. Leave both blank to disable this optional integration. Supply both or neither. A publishable/anon key is insufficient. Do not paste privileged keys into chat, browser inputs, SQL source, the app, or git. Legacy service-role JWTs use `apikey` plus bearer headers; newer `sb_secret_` keys use `apikey` only and depend on the project's gateway support.
+3. Log into `/admin` with the separate **admin token**, not the Supabase key. Refresh loads aggregate metrics. Successful remote snapshots are reused for 60 seconds; failures are reused for 15 seconds, and any prior snapshot is explicitly marked stale. Upstream timeout is 10 seconds, browser deadline 15 seconds. A missing migration, denied permission or outage shows **Unavailable**, never fake zero users. Course/cache monitoring still works.
+
+Metric definitions:
+
+- **Current accounts:** non-anonymous Auth rows not soft-deleted. Includes unconfirmed or banned accounts; these are account counts, not unique people.
+- **Signed in last 30 days:** current accounts whose Auth `last_sign_in_at` is within 30 days. This is an explicit **sign-in recency proxy**, not actual app activity/online presence/monthly active users. Token refresh and offline app use are not measured. Accurate app activity needs future authenticated usage/heartbeat instrumentation.
+- **Known registrations:** current baseline registrations plus observed registrations after tracking starts, retained as aggregate numbers even after deletion. Physically deleted accounts from before installation are unknowable from current Auth rows, so the UI shows a **lower bound** with `+`, not an exact all-time total. Soft deletion followed by hard deletion counts once. Anonymous accounts are excluded; anonymous-to-registered conversion counts as registration. Re-registration counts as another account, not another unique human.
+- **Current-user logical sync:** aggregate PostgreSQL JSONB column sizes for records (including tombstones), history events and mutation receipts belonging to current registered accounts. Average includes zero-byte accounts; maximum is the largest per-account logical total. Compression/row/index effects mean these are **payload-size estimates**, not billed capacity or a full disk allocation per user. Unsynced device-only data and shared course/elevation cache are not counted here.
+- **Physical sync tables:** all four sync relations including indexes/TOAST and all retained rows. **Whole project database** is broader still, including Auth and other schemas. These are separate operational sizes; never add logical bytes to physical bytes. **Object storage** is explicitly unknown, not zero; this implementation does not measure Supabase Storage bucket contents, backups, WAL, quotas or future capacity requirements. Use the Supabase billing/usage dashboard for plan capacity and object storage, and growth history before forecasting needed storage.
+
+No Supabase requests occur at server startup or from the ordinary overview/data routes. Only an authenticated accounts request invokes the fixed RPC; no background polls, signup calls or paid golf/elevation calls are made. Counts are not filtered by the traffic-period selector. Metrics are held in server memory briefly, not copied into the course cache. The SQL lifecycle counters contain no user identity history. Privileged service credentials have broad power: secure the home machine, use HTTPS for remote admin access and rotate keys if exposed.
 
 ## API contract
 

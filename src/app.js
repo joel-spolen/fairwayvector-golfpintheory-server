@@ -8,6 +8,7 @@ import { profileRequest } from './geometry.js';
 import { APIError } from './errors.js';
 import { AdminStore } from './admin-store.js';
 import { registerAdmin } from './admin.js';
+import { SupabaseMetrics } from './supabase-metrics.js';
 
 const hash = value => createHash('sha256').update(value).digest('hex');
 const identifier = { type: 'object', required: ['id'], additionalProperties: false,
@@ -18,7 +19,7 @@ const querySchema = { type: 'object', additionalProperties: false, properties: {
   timestampUpdated: { type: 'string', maxLength: 100 }
 } };
 
-export async function buildApp(config, { fetchImpl, now, logger = false } = {}) {
+export async function buildApp(config, { fetchImpl, supabaseFetchImpl, now, logger = false } = {}) {
   const app = Fastify({ logger, bodyLimit: 300000, trustProxy: false,
     ajv: { customOptions: { removeAdditional: false, coerceTypes: false } },
     requestTimeout: 40000, connectionTimeout: 45000 });
@@ -114,7 +115,8 @@ export async function buildApp(config, { fetchImpl, now, logger = false } = {}) 
       return result.body;
     }
     const only = request => request.headers['x-cache-only'] === 'true';
-    await registerAdmin(app, adminStore, config);
+    await registerAdmin(app, adminStore, config,
+      new SupabaseMetrics(config.supabaseMetrics, { fetchImpl: supabaseFetchImpl, now }));
     app.get('/healthz', async () => ({ status: 'ok' }));
     for (const kind of ['clubs', 'courses']) {
       app.get(`/api/v1/golf/${kind}`, { schema: { querystring: querySchema } }, async (request, reply) => {

@@ -4,6 +4,7 @@
   // The credential and snapshot deliberately never leave this closure for storage.
   let token = '';
   let snapshot = null;
+  let accountSnapshot = null;
   let busy = false;
   let generation = 0;
   let controller = null;
@@ -63,6 +64,7 @@
     controller = null;
     token = '';
     snapshot = null;
+    accountSnapshot = null;
     busy = false;
     stale = false;
     search = '';
@@ -79,6 +81,12 @@
     for (const id of ['daily-rows', 'traffic-chart', 'providers', 'inventory-stats', 'course-rows', 'profile-key', 'course-id', 'profile-detail']) $(id).replaceChildren();
     for (const id of ['snapshot-time', 'requests-note', 'hitrate-note', 'upstream-note', 'tracking-note', 'trend-period', 'page-summary', 'unassigned-count', 'assignment-status', 'assignment-empty', 'courses-empty', 'notice']) set(id, '');
     for (const id of ['metric-requests', 'metric-hitrate', 'metric-upstream', 'metric-samples']) set(id, '—');
+    for (const id of ['accounts-current', 'accounts-active', 'accounts-registrations', 'accounts-deletions']) set(id, '—');
+    for (const id of ['accounts-notice', 'accounts-time', 'accounts-registration-note', 'accounts-tracking']) set(id, '');
+    $('accounts-storage').replaceChildren();
+    $('accounts').setAttribute('aria-busy', 'false');
+    $('accounts-definitions').removeAttribute('open');
+    set('accounts-status', 'Not loaded');
     $('assignment-form').hidden = true;
     set('login-error', message);
     set('session-label', 'Authentication required');
@@ -117,7 +125,7 @@
     const current = generation;
     controller = new AbortController();
     const params = new URLSearchParams({ days: $('period').value, search, page: String(page) });
-    set('notice', snapshot ? 'Updating snapshot… Last successful data remains visible.' : 'Loading private snapshot…');
+    set('notice', snapshot ? 'Updating snapshot and users & storage… Last successful data remains visible.' : 'Loading private snapshot, then users & storage…');
     updateControls();
     try {
       let data = await api(`/api/admin/overview?${params}`, controller.signal);
@@ -147,6 +155,8 @@
       set('notice', successMessage);
       configureTimer();
       if (firstSnapshot) $('main').focus();
+      // Authenticate with overview first. Account failures must not stale the cache snapshot.
+      await loadAccountMetrics(current, controller.signal);
     } catch (error) {
       if (current !== generation || error.name === 'AbortError') return;
       if (error.status === 401 || error.status === 403) {
@@ -162,9 +172,103 @@
       page = snapshot.courses.page;
       search = snapshotSearch;
       $('course-search').value = snapshotSearch;
+      accountFailure('Account metrics were not refreshed because the overview request failed.');
       set('notice', `${messageFor(error)} Showing the last successful snapshot (${snapshot.period.label}); data may be stale. Associations are paused until refresh succeeds.`);
     } finally {
       if (current === generation) { busy = false; controller = null; updateControls(); }
+    }
+  }
+  function validAccountData(data) {
+    const validDate = value => typeof value === 'string' && Number.isFinite(Date.parse(value));
+    const validCount = value => Number.isSafeInteger(value) && value >= 0;
+    return data?.schemaVersion === 1 && validDate(data.generatedAt) && validDate(data.trackingStartedAt)
+      && typeof data.historyComplete === 'boolean' && data.activityDefinition === 'signed_in_last_30_days'
+      && ['current', 'active30d', 'knownRegistrations', 'knownDeletions'].every(key => validCount(data.users?.[key]))
+      && ['currentUserSyncBytes', 'recordsBytes', 'historyBytes', 'receiptsBytes', 'averageBytesPerUser',
+        'maxBytesPerUser', 'syncPhysicalBytes', 'databaseBytes'].every(key => validCount(data.storage?.[key]))
+      && data.storage.objectStorageBytes === null;
+  }
+  function renderAccountMetrics(result) {
+    const { data, fetchedAt } = result;
+    const { users, storage } = data;
+    set('accounts-current', count(users.current));
+    set('accounts-active', count(users.active30d));
+    set('accounts-registrations', `${count(users.knownRegistrations)}${data.historyComplete ? '' : '+'}`);
+    set('accounts-registration-note', data.historyComplete
+      ? 'Includes known deleted accounts. Accounts, not unique humans.'
+      : 'Lower bound, including known deleted accounts. Earlier physically deleted accounts are unknown.');
+    set('accounts-deletions', count(users.knownDeletions));
+    set('accounts-time', `Account snapshot ${date(data.generatedAt)} · Fetched by server ${date(fetchedAt)} · Not filtered by traffic period`);
+    set('accounts-tracking', `Account tracking began ${date(data.trackingStartedAt)}. ${data.historyComplete ? 'Registration history is marked complete.' : 'Registration history is incomplete; known registrations are a lower bound, not a lifetime total.'}`);
+    const host = $('accounts-storage');
+    host.replaceChildren();
+    for (const [label, value, note] of [
+      ['Current-user logical sync', bytes(storage.currentUserSyncBytes), 'Total JSONB payload estimate for current accounts; not billed storage.'],
+      ['Average per current account', bytes(storage.averageBytesPerUser), 'Includes accounts with zero sync bytes; rounded up to a whole byte.'],
+      ['Maximum per current account', bytes(storage.maxBytesPerUser), 'Largest logical sync estimate for one current account.'],
+      ['Records', bytes(storage.recordsBytes), 'Current-user record payloads, including tombstones.'],
+      ['History', bytes(storage.historyBytes), 'Current-user sync history payloads.'],
+      ['Receipts', bytes(storage.receiptsBytes), 'Current-user sync receipt payloads.'],
+      ['Physical sync tables', bytes(storage.syncPhysicalBytes), 'Shared tables, all rows and indexes; not per-user storage.'],
+      ['Whole project database', bytes(storage.databaseBytes), 'Total project database size, not just users or sync data.'],
+      ['Object storage', 'Unknown', 'Not measured; unknown does not mean zero.']
+    ]) {
+      const item = element('div', undefined, 'storage-stat');
+      const valueNode = element('dd', value);
+      valueNode.append(element('p', note));
+      item.append(element('dt', label), valueNode);
+      host.append(item);
+    }
+  }
+  function accountFailure(message) {
+    set('accounts-status', accountSnapshot ? 'Stale' : 'Unavailable');
+    set('accounts-notice', `${message} ${accountSnapshot ? 'Showing the last available account snapshot; these figures are stale.' : 'Account figures are unavailable, not zero.'} Cache monitoring remains available.`);
+  }
+  async function loadAccountMetrics(current, parentSignal) {
+    // This child deadline never aborts overview or association controllers.
+    const accountController = new AbortController();
+    const abort = () => accountController.abort();
+    parentSignal.addEventListener('abort', abort, { once: true });
+    if (parentSignal.aborted) abort();
+    // Allow the server's 10-second upstream timeout to return its stale envelope.
+    const deadline = setTimeout(abort, 15000);
+    $('accounts').setAttribute('aria-busy', 'true');
+    set('accounts-status', 'Loading');
+    set('accounts-notice', `Loading users & storage (up to 15 seconds)…${accountSnapshot ? ' Previous account figures remain visible until this check completes.' : ''}`);
+    try {
+      const result = await api('/api/admin/accounts', accountController.signal);
+      if (current !== generation || parentSignal.aborted) return;
+      if (!result || !['ready', 'disabled', 'unavailable'].includes(result.status)
+        || typeof result.message !== 'string'
+        || !(result.fetchedAt === null || (typeof result.fetchedAt === 'string' && Number.isFinite(Date.parse(result.fetchedAt))))
+        || !(result.data === null || validAccountData(result.data))
+        || (result.status === 'ready' && (!result.data || !result.fetchedAt))) throw new Error('Invalid account snapshot');
+      if (result.data) {
+        accountSnapshot = { data: result.data, fetchedAt: result.fetchedAt };
+        renderAccountMetrics(accountSnapshot);
+      }
+      if (result.status === 'ready') {
+        set('accounts-status', 'Ready');
+        set('accounts-notice', '');
+      } else if (result.status === 'disabled') {
+        accountFailure('Account metrics are not configured. Operator setup: apply the account metrics migration first, then configure SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY on the server only, never in this browser.');
+        if (!accountSnapshot) set('accounts-status', 'Not configured');
+      } else {
+        accountFailure('Account metrics are temporarily unavailable. If setup is incomplete, the operator must apply the account metrics migration first, then configure SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY on the server only, never in this browser.');
+      }
+    } catch (error) {
+      if (current !== generation || parentSignal.aborted) return;
+      if (error.status === 401 || error.status === 403) {
+        clearSession('Access denied or session expired. Enter a valid admin token to continue.');
+        return;
+      }
+      accountFailure(error.name === 'AbortError'
+        ? 'The account metrics request timed out. Try Refresh again.'
+        : 'Account metrics could not be loaded. The optional endpoint may be unavailable or not yet deployed.');
+    } finally {
+      clearTimeout(deadline);
+      parentSignal.removeEventListener('abort', abort);
+      if (current === generation) $('accounts').setAttribute('aria-busy', 'false');
     }
   }
   function svgNode(tag, attributes, text) {
